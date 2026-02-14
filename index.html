@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
   <title>印尼语实战弹药库</title>
+  <!-- 添加Supabase客户端库 -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
   <style>
     * {
       box-sizing: border-box;
@@ -398,6 +400,7 @@
       border-radius: 30px;
       font-size: 1rem;
       transition: border-color 0.2s;
+      font-family: inherit;
     }
 
     .form-control:focus {
@@ -663,55 +666,90 @@ kantor,办公室,不记得"></textarea>
   </div>
 
   <script>
-    // Supabase 配置（请替换为你的配置）
+    // Supabase 配置 - 请替换为你的实际值
     const SUPABASE_URL = 'https://bnsbjgyulputgmqixjzs.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_AMpdOLRMYhtY32EbVrhEUg_d58mXmte';
 
     // 全局变量
     let currentPage = 1;
-    const pageSize = 10; // 10条/页
-    let filterStatus = 'all'; // 'all', '记得', '模糊', '不记得'
+    const pageSize = 10;
+    let filterStatus = 'all';
     let totalWords = 0;
     let words = [];
-    let pendingDeleteId = null; // 待删除的单词ID
+    let pendingDeleteId = null;
+    let sb = null;  // 改用 sb 作为客户端变量名
+
+    // 初始化Supabase客户端
+    function initSupabase() {
+      if (SUPABASE_URL.includes('your-project') || SUPABASE_KEY.includes('your-anon')) {
+        showToast('❌ 请先配置正确的Supabase URL和KEY', 'error');
+        return false;
+      }
+
+      try {
+        sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        console.log('Supabase客户端初始化成功', sb);
+        return true;
+      } catch (error) {
+        console.error('Supabase初始化失败:', error);
+        showToast('Supabase初始化失败: ' + error.message, 'error');
+        return false;
+      }
+    }
 
     // 初始化
     async function init() {
-      // 初始模拟数据
-      words = [
-        { id: 1, word: 'rapat', meaning: '会议', status: '模糊' },
-        { id: 2, word: 'nasi', meaning: '米饭', status: '记得' },
-        { id: 3, word: 'pedas', meaning: '辣', status: '不记得' },
-        { id: 4, word: 'kantor', meaning: '办公室', status: '记得' },
-        { id: 5, word: 'minum', meaning: '喝', status: '模糊' },
-        { id: 6, word: 'makan', meaning: '吃', status: '记得' },
-        { id: 7, word: 'selamat pagi', meaning: '早上好', status: '记得' },
-        { id: 8, word: 'terima kasih', meaning: '谢谢', status: '记得' },
-        { id: 9, word: 'sama sama', meaning: '不客气', status: '模糊' },
-        { id: 10, word: 'maaf', meaning: '对不起', status: '模糊' },
-        { id: 11, word: 'tolong', meaning: '请/帮忙', status: '记得' },
-        { id: 12, word: 'bisa', meaning: '能/可以', status: '记得' },
-        { id: 13, word: 'tidak', meaning: '不', status: '记得' },
-        { id: 14, word: 'ya', meaning: '是', status: '记得' },
-        { id: 15, word: 'apa', meaning: '什么', status: '模糊' },
-        { id: 16, word: 'siapa', meaning: '谁', status: '模糊' },
-        { id: 17, word: 'kapan', meaning: '何时', status: '不记得' },
-        { id: 18, word: 'dimana', meaning: '哪里', status: '不记得' },
-        { id: 19, word: 'kenapa', meaning: '为什么', status: '不记得' },
-        { id: 20, word: 'berapa', meaning: '多少', status: '模糊' },
-        { id: 21, word: 'saya', meaning: '我', status: '记得' },
-        { id: 22, word: 'kamu', meaning: '你', status: '记得' },
-        { id: 23, word: 'dia', meaning: '他/她', status: '记得' },
-        { id: 24, word: 'kami', meaning: '我们', status: '记得' },
-        { id: 25, word: 'mereka', meaning: '他们', status: '记得' }
-      ];
+      console.log('页面初始化...');
+      const connected = initSupabase();
 
-      // 按状态排序：不记得 → 模糊 → 记得
-      sortWordsByStatus();
+      if (connected) {
+        await loadWordsFromDB();
+      } else {
+        words = [];
+        await loadStats();
+        await loadWords();
+      }
 
-      await loadStats();
-      await loadWords();
       setupEventListeners();
+    }
+
+    // 从数据库加载单词
+    async function loadWordsFromDB() {
+      try {
+        showLoading(true);
+
+        const { data, error } = await sb
+          .from('words')
+          .select('*')
+          .order('created_at', { ascending: true });
+
+        if (error) {
+          console.error('数据库查询失败:', error);
+          showToast('数据库连接失败: ' + error.message, 'error');
+          words = [];
+        } else {
+          console.log('加载到单词:', data);
+          words = data || [];
+        }
+
+        sortWordsByStatus();
+        await loadStats();
+        await loadWords();
+      } catch (error) {
+        console.error('连接数据库出错:', error);
+        showToast('连接数据库出错，请检查配置', 'error');
+        words = [];
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    // 显示/隐藏加载状态
+    function showLoading(show) {
+      const container = document.getElementById('wordList');
+      if (show) {
+        container.innerHTML = '<div class="loading">⏳ 加载中...</div>';
+      }
     }
 
     // 按状态排序
@@ -737,14 +775,12 @@ kantor,办公室,不记得"></textarea>
 
     // 加载单词列表
     async function loadWords() {
-      // 根据筛选条件过滤
       let filteredWords = filterStatus === 'all'
         ? [...words]
         : words.filter(w => w.status === filterStatus);
 
       totalWords = filteredWords.length;
 
-      // 分页
       const start = (currentPage - 1) * pageSize;
       const end = start + pageSize;
       const pageWords = filteredWords.slice(start, end);
@@ -756,6 +792,11 @@ kantor,办公室,不记得"></textarea>
     // 渲染单词列表
     function renderWords(pageWords) {
       const container = document.getElementById('wordList');
+
+      if (!sb) {
+        container.innerHTML = '<div class="empty-state">🔌 请先配置Supabase连接</div>';
+        return;
+      }
 
       if (pageWords.length === 0) {
         container.innerHTML = '<div class="empty-state">📭 暂无单词，点击上方添加</div>';
@@ -788,7 +829,7 @@ kantor,办公室,不记得"></textarea>
 
       container.innerHTML = html;
 
-      // 为每个释义区域添加点击事件
+      // 释义点击事件
       document.querySelectorAll('.meaning-area').forEach(area => {
         area.addEventListener('click', function(e) {
           e.stopPropagation();
@@ -805,29 +846,41 @@ kantor,办公室,不记得"></textarea>
         });
       });
 
-      // 为状态按钮添加事件
+      // 状态按钮事件
       document.querySelectorAll('.status-btn').forEach(btn => {
         btn.addEventListener('click', async function(e) {
           e.stopPropagation();
+          if (!sb) {
+            showToast('请先配置Supabase连接', 'error');
+            return;
+          }
           const wordId = parseInt(this.dataset.id);
           const newStatus = this.dataset.status;
           await updateWordStatus(wordId, newStatus);
         });
       });
 
-      // 为编辑按钮添加事件
+      // 编辑按钮事件
       document.querySelectorAll('[data-action="edit"]').forEach(btn => {
         btn.addEventListener('click', function(e) {
           e.stopPropagation();
+          if (!sb) {
+            showToast('请先配置Supabase连接', 'error');
+            return;
+          }
           const wordId = parseInt(this.dataset.id);
           openEditModal(wordId);
         });
       });
 
-      // 为删除按钮添加事件
+      // 删除按钮事件
       document.querySelectorAll('[data-action="delete"]').forEach(btn => {
         btn.addEventListener('click', function(e) {
           e.stopPropagation();
+          if (!sb) {
+            showToast('请先配置Supabase连接', 'error');
+            return;
+          }
           const wordId = parseInt(this.dataset.id);
           openDeleteModal(wordId);
         });
@@ -836,13 +889,26 @@ kantor,办公室,不记得"></textarea>
 
     // 更新单词状态
     async function updateWordStatus(wordId, newStatus) {
-      const word = words.find(w => w.id === wordId);
-      if (word) {
-        word.status = newStatus;
+      try {
+        const { error } = await sb
+          .from('words')
+          .update({ status: newStatus, updated_at: new Date() })
+          .eq('id', wordId);
+
+        if (error) throw error;
+
+        const word = words.find(w => w.id === wordId);
+        if (word) {
+          word.status = newStatus;
+        }
+
         sortWordsByStatus();
         await loadStats();
         await loadWords();
         showToast(`状态已更新为 ${newStatus}`);
+      } catch (error) {
+        console.error('更新状态失败:', error);
+        showToast('更新失败: ' + error.message, 'error');
       }
     }
 
@@ -861,21 +927,33 @@ kantor,办公室,不记得"></textarea>
     async function confirmDelete() {
       if (!pendingDeleteId) return;
 
-      words = words.filter(w => w.id !== pendingDeleteId);
-      sortWordsByStatus();
+      try {
+        const { error } = await sb
+          .from('words')
+          .delete()
+          .eq('id', pendingDeleteId);
 
-      // 如果当前页没有数据了，且不是第一页，则返回上一页
-      const filteredWords = filterStatus === 'all' ? words : words.filter(w => w.status === filterStatus);
-      const totalPages = Math.ceil(filteredWords.length / pageSize);
-      if (currentPage > totalPages && currentPage > 1) {
-        currentPage = totalPages;
+        if (error) throw error;
+
+        words = words.filter(w => w.id !== pendingDeleteId);
+        sortWordsByStatus();
+
+        const filteredWords = filterStatus === 'all' ? words : words.filter(w => w.status === filterStatus);
+        const totalPages = Math.ceil(filteredWords.length / pageSize);
+        if (currentPage > totalPages && currentPage > 1) {
+          currentPage = totalPages;
+        }
+
+        await loadStats();
+        await loadWords();
+        showToast('🗑️ 单词已删除');
+      } catch (error) {
+        console.error('删除失败:', error);
+        showToast('删除失败: ' + error.message, 'error');
+      } finally {
+        document.getElementById('deleteModal').classList.remove('show');
+        pendingDeleteId = null;
       }
-
-      await loadStats();
-      await loadWords();
-      showToast('🗑️ 单词已删除');
-      document.getElementById('deleteModal').classList.remove('show');
-      pendingDeleteId = null;
     }
 
     // 打开编辑弹窗
@@ -910,30 +988,46 @@ kantor,办公室,不记得"></textarea>
       const meaning = formData.get('meaning');
       const status = formData.get('status');
 
-      if (wordId) {
-        // 更新
-        const existing = words.find(w => w.id == wordId);
-        if (existing) {
-          existing.word = word;
-          existing.meaning = meaning;
-          existing.status = status;
-        }
-      } else {
-        // 新增
-        const newWord = {
-          id: Date.now() + Math.random(),
-          word: word,
-          meaning: meaning,
-          status: status
-        };
-        words.push(newWord);
-      }
+      try {
+        if (wordId) {
+          const { error } = await sb
+            .from('words')
+            .update({ word, meaning, status, updated_at: new Date() })
+            .eq('id', wordId);
 
-      sortWordsByStatus();
-      await loadStats();
-      await loadWords();
-      showToast(wordId ? '✅ 单词已更新' : '✅ 单词已添加');
-      document.getElementById('wordModal').classList.remove('show');
+          if (error) throw error;
+
+          const existing = words.find(w => w.id == wordId);
+          if (existing) {
+            existing.word = word;
+            existing.meaning = meaning;
+            existing.status = status;
+          }
+
+          showToast('✅ 单词已更新');
+        } else {
+          const { data, error } = await sb
+            .from('words')
+            .insert([{ word, meaning, status }])
+            .select();
+
+          if (error) throw error;
+
+          if (data && data[0]) {
+            words.push(data[0]);
+          }
+
+          showToast('✅ 单词已添加');
+        }
+
+        sortWordsByStatus();
+        await loadStats();
+        await loadWords();
+        document.getElementById('wordModal').classList.remove('show');
+      } catch (error) {
+        console.error('保存失败:', error);
+        showToast('保存失败: ' + error.message, 'error');
+      }
     }
 
     // 更新分页
@@ -978,10 +1072,20 @@ kantor,办公室,不记得"></textarea>
       });
 
       // 添加按钮
-      document.getElementById('addBtn').addEventListener('click', openAddModal);
+      document.getElementById('addBtn').addEventListener('click', () => {
+        if (!sb) {
+          showToast('请先配置Supabase连接', 'error');
+          return;
+        }
+        openAddModal();
+      });
 
       // 导入按钮
       document.getElementById('importBtn').addEventListener('click', () => {
+        if (!sb) {
+          showToast('请先配置Supabase连接', 'error');
+          return;
+        }
         document.getElementById('importModal').classList.add('show');
         document.getElementById('previewArea').style.display = 'none';
         document.getElementById('importInitialActions').style.display = 'flex';
@@ -1005,7 +1109,6 @@ kantor,办公室,不记得"></textarea>
           return;
         }
 
-        // 解析CSV
         const lines = text.split('\n').filter(line => line.trim());
         const parsedWords = [];
         const errors = [];
@@ -1031,7 +1134,6 @@ kantor,办公室,不记得"></textarea>
           return;
         }
 
-        // 检查重复
         const existingWords = words;
         const newWords = [];
         const duplicateWords = [];
@@ -1045,10 +1147,8 @@ kantor,办公室,不记得"></textarea>
           }
         });
 
-        // 渲染预览
         renderImportPreview(newWords, duplicateWords);
 
-        // 显示预览区域
         document.getElementById('previewArea').style.display = 'block';
         document.getElementById('importInitialActions').style.display = 'none';
       });
@@ -1058,37 +1158,39 @@ kantor,办公室,不记得"></textarea>
         const { newWords, duplicateWords } = window.importPreviewData || { newWords: [], duplicateWords: [] };
         const duplicateOption = document.querySelector('input[name="duplicateOption"]:checked').value;
 
-        let wordsToAdd = [...newWords];
+        try {
+          let wordsToAdd = [...newWords];
 
-        if (duplicateWords.length > 0) {
-          if (duplicateOption === 'overwrite') {
-            // 覆盖：先删除原有的，再加入新的
-            duplicateWords.forEach(dw => {
-              const index = words.findIndex(w => w.word === dw.word && w.meaning === dw.meaning);
-              if (index !== -1) {
-                words.splice(index, 1);
-              }
-            });
+          if (duplicateWords.length > 0 && duplicateOption === 'overwrite') {
+            for (const dw of duplicateWords) {
+              await sb
+                .from('words')
+                .delete()
+                .eq('word', dw.word)
+                .eq('meaning', dw.meaning);
+            }
             wordsToAdd = [...wordsToAdd, ...duplicateWords];
           }
-          // skip：不加任何操作
+
+          if (wordsToAdd.length > 0) {
+            const { error } = await sb
+              .from('words')
+              .insert(wordsToAdd.map(w => ({
+                word: w.word,
+                meaning: w.meaning,
+                status: w.status
+              })));
+
+            if (error) throw error;
+          }
+
+          await loadWordsFromDB();
+          showToast(`✅ 成功导入 ${wordsToAdd.length} 个单词`);
+          document.getElementById('importModal').classList.remove('show');
+        } catch (error) {
+          console.error('导入失败:', error);
+          showToast('导入失败: ' + error.message, 'error');
         }
-
-        // 添加新单词
-        wordsToAdd.forEach(w => {
-          words.push({
-            id: Date.now() + Math.random(),
-            word: w.word,
-            meaning: w.meaning,
-            status: w.status
-          });
-        });
-
-        sortWordsByStatus();
-        await loadStats();
-        await loadWords();
-        showToast(`✅ 成功导入 ${wordsToAdd.length} 个单词`);
-        document.getElementById('importModal').classList.remove('show');
       });
 
       // 分页
@@ -1151,10 +1253,8 @@ kantor,办公室,不记得"></textarea>
 
     // 渲染导入预览
     function renderImportPreview(newWords, duplicateWords) {
-      // 存储供确认导入使用
       window.importPreviewData = { newWords, duplicateWords };
 
-      // 新单词表格
       let newHtml = '';
       if (newWords.length > 0) {
         newHtml += '<div style="font-weight: 500; margin-bottom: 8px;">✅ 新单词：</div>';
@@ -1173,7 +1273,6 @@ kantor,办公室,不记得"></textarea>
       }
       document.getElementById('newWordsPreview').innerHTML = newHtml;
 
-      // 重复单词表格
       let dupHtml = '';
       if (duplicateWords.length > 0) {
         dupHtml += '<div style="font-weight: 500; margin-bottom: 8px;">⚠️ 重复单词：</div>';
@@ -1193,7 +1292,6 @@ kantor,办公室,不记得"></textarea>
       }
       document.getElementById('duplicateWordsPreview').innerHTML = dupHtml;
 
-      // 统计信息
       const total = newWords.length + duplicateWords.length;
       document.getElementById('importStats').innerHTML = `总计: ${total}条 | ✅ 新: ${newWords.length} | ⚠️ 重复: ${duplicateWords.length}`;
     }
